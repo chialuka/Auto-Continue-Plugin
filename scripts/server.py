@@ -70,10 +70,10 @@ def handle(message, store):
         return {'tools': [dict(name=name,description=desc,inputSchema=spec,
                               annotations={'readOnlyHint':name in ('resume_direct_status','resume_status','resume_meter','resume_meter_state'),
                                            'openWorldHint':name=='resume_direct_enable', 'destructiveHint':False},
-                              **({'title':'Resume After Reset','_meta':{'ui':{'resourceUri':URI},'openai/ui':{'entrypoints':[{'type':'thread'}]}}} if name=='resume_meter' else {}))
+                              **({'title':'Auto-Continue','_meta':{'ui':{'resourceUri':URI},'openai/ui':{'entrypoints':[{'type':'thread'}]}}} if name=='resume_meter' else {}))
                           for name,desc,spec in TOOLS]}
     if method == 'resources/list':
-        return {'resources':[{'uri':URI,'name':'Resume After Reset','mimeType':'text/html;profile=mcp-app'}]}
+        return {'resources':[{'uri':URI,'name':'Auto-Continue','mimeType':'text/html;profile=mcp-app'}]}
     if method == 'resources/read':
         if params.get('uri') != URI: raise ValueError('Unknown resource')
         return {'contents':[{'uri':URI,'mimeType':'text/html;profile=mcp-app',

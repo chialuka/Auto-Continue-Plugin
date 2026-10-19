@@ -124,7 +124,7 @@ class Store:
                       (token, plan['scheduledFor'], thread))
             args = {'mode': 'update' if job['automation'] else 'create',
                     'kind': 'heartbeat', 'destination': 'thread',
-                    'name': 'Resume After Reset — '+thread[:12],
+                    'name': 'Auto-Continue — '+thread[:12],
                     'prompt': prompt(thread, generation, timezone),
                     'rrule': plan['rrule'], 'status': 'ACTIVE'}
             if job['automation']: args['id'] = job['automation']
@@ -339,7 +339,7 @@ class Store:
         job = self.get(thread) if thread else None
         if not job or job['status'] != 'armed': return {}
         name = event.get('hook_event_name')
-        context = ('Resume After Reset is armed for this chat. Its saved continuation instruction is frozen; '
+        context = ('Auto-Continue is armed for this chat. Its saved continuation instruction is frozen; '
                    'later user messages and interruptions do not change or cancel it. Do not read usage '
                    'just for this registration; the scheduled delivery performs its one fresh authorization check. '
                    'Only an explicit user request to disable/cancel may cancel this registration.')

@@ -40,4 +40,4 @@ if __name__=='__main__':
     parser.add_argument('--remove',action='store_true',help='Remove marketplace entry, retaining all data and plugin files')
     args=parser.parse_args()
     print(register(Path(__file__).resolve().parents[1],Path.home(),args.remove))
-    print('Restart the desktop app, open Plugins, select the local source, and install or refresh Resume After Reset.')
+    print('Restart the desktop app, open Plugins, select the local source, and install or refresh Auto-Continue.')

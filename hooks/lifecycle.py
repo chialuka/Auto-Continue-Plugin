@@ -9,4 +9,4 @@ try:
     print(json.dumps(result))
 except Exception as exc:
     # Advisory only: never block normal work because the plugin failed.
-    print(json.dumps({'systemMessage':'Resume After Reset hook unavailable: '+str(exc)}))
+    print(json.dumps({'systemMessage':'Auto-Continue hook unavailable: '+str(exc)}))

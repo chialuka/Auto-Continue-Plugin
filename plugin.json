@@ -9,7 +9,7 @@
   "extensions": {
     "com.openai": {
       "interface": {
-        "displayName": "Resume After Reset",
+        "displayName": "Auto-Continue",
         "shortDescription": "Continue chats after a usage reset",
         "longDescription": "Automatically send your saved continuation instruction into the same chat after the next usage reset. A local macOS service handles the schedule and delivery. An optional account usage meter shows your available allowance.",
         "developerName": "Local prototype",

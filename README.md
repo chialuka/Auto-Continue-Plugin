@@ -1,4 +1,4 @@
-# Resume After Reset
+# Auto-Continue
 
 A local macOS plugin that queues your saved continuation instruction into the same Codex chat at the next reset plus one minute.
 
