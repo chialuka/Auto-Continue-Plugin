@@ -49,15 +49,7 @@ An exclusive worker lock and transactional claim prevent duplicate sends. Cancel
 
 The worker restarts through launchd, and persisted overdue timers are considered after restart or waking. It cannot execute while the Mac is asleep, powered off, or logged out. Real exhausted-quota recovery and physical sleep/wake require natural-condition acceptance testing; timer/queue smoke tests do not prove those cases.
 
-## Testing and removal
-
-```sh
-python3 -m unittest discover -s tests -q
-node tests/test_ui.js
-python3 scripts/check_package.py
-```
-
-For an explicitly authorized transport test, `python3 scripts/direct_service.py smoke --thread YOUR_CHAT_UUID --delay 45 --instruction "YOUR HARMLESS TEST MESSAGE"` creates a distinctly labeled test timer. It uses the same persistent worker and queue path but does not wait for real quota exhaustion.
+## Removal
 
 To cancel a pending direct timer, use its panel button, `resume_direct_cancel`, or `python3 scripts/direct_service.py cancel --thread YOUR_CHAT_UUID`. To remove the worker without deleting history, run `python3 scripts/direct_service.py uninstall`; retained timers will not fire until it is installed again. Uninstalling the plugin through the host does not automatically remove the independent launch agent, so remove the service too.
 
@@ -65,8 +57,8 @@ To cancel a pending direct timer, use its panel button, `resume_direct_cancel`, 
 
 Legacy native scheduling tools remain available for older registrations. Direct setup refuses to arm a chat that has an active native registration, and native setup refuses an active direct registration. Existing native automation prompts remain snapshots from their creation time. Disable an old native timer explicitly before moving that chat to direct scheduling.
 
-The meter continues to read local quota events for display. Its passive values are never used to authorize delivery. See [INSTALL.md](INSTALL.md) for the earlier native setup and [DIRECT-HOST-INVESTIGATION.md](DIRECT-HOST-INVESTIGATION.md) for the transport investigation.
+The optional meter reads local quota events for display. Its passive values are never used to authorize delivery. For older native registrations, use the compatibility instructions in the plugin skill.
 
 ## Public source and directory submission
 
-Licensed under [MIT](LICENSE). This is an independent project and does not claim OpenAI endorsement. See [SUBMISSION.md](SUBMISSION.md) for official directory requirements and this release's remaining gaps. GitHub publication is separate from directory review. No remote repository is configured by this source package.
+Licensed under [MIT](LICENSE). This is an independent project and does not claim OpenAI endorsement. Manual GitHub marketplace distribution is separate from OpenAI directory review. No remote repository is configured by this source package.
