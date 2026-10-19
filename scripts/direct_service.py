@@ -1,4 +1,5 @@
 """Install/manage a per-user launchd worker, or configure direct timers without inference."""
+
 import argparse
 import fcntl
 import json
@@ -21,26 +22,41 @@ FILES = ('direct_service.py', 'direct_host.py', 'direct_scheduler.py', 'probe_di
 
 
 def service_status(root=None):
-    plist = Path.home()/'Library/LaunchAgents'/f'{LABEL}.plist'
+    plist = Path.home() / 'Library/LaunchAgents' / f'{LABEL}.plist'
     if sys.platform != 'darwin':
-        return {'installed': False, 'loaded': False, 'error': 'This installer currently supports macOS'}
-    result = subprocess.run(['launchctl', 'print', f'gui/{os.getuid()}/{LABEL}'],
-                            capture_output=True, text=True, timeout=10)
+        return {
+            'installed': False,
+            'loaded': False,
+            'error': 'This installer currently supports macOS',
+        }
+    result = subprocess.run(
+        ['launchctl', 'print', f'gui/{os.getuid()}/{LABEL}'],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
     pid = re.search(r'\bpid = (\d+)', result.stdout)
     args = plistlib.loads(plist.read_bytes()).get('ProgramArguments', []) if plist.exists() else []
-    data_root = args[args.index('--root')+1] if '--root' in args else None
-    return {'installed': plist.exists(), 'loaded': result.returncode == 0,
-            'pid': int(pid[1]) if pid else None, 'plist': str(plist), 'dataRoot': data_root}
+    data_root = args[args.index('--root') + 1] if '--root' in args else None
+    return {
+        'installed': plist.exists(),
+        'loaded': result.returncode == 0,
+        'pid': int(pid[1]) if pid else None,
+        'plist': str(plist),
+        'dataRoot': data_root,
+    }
 
 
 def install(root=None, codex=None, force=False):
     root = Path(root or root_path()).resolve()
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with (root/'direct-install.lock').open('a') as lock:
+    with (root / 'direct-install.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         state = service_status(root)
         if state['loaded'] and state.get('dataRoot') != str(root):
-            raise RuntimeError('Existing service uses another data directory; inspect its timers first')
+            raise RuntimeError(
+                'Existing service uses another data directory; inspect its timers first'
+            )
         if state['loaded'] and state['pid'] and not force:
             return state
         return _install(root, codex)
@@ -53,22 +69,45 @@ def _install(root=None, codex=None):
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     codex = codex or executable()
     source = Path(__file__).resolve().parent
-    runtime_parent = root/'runtime'
+    runtime_parent = root / 'runtime'
     runtime_parent.mkdir(exist_ok=True, mode=0o700)
     # Each install gets its own complete snapshot; never run out of a version cache.
-    runtime = Path(tempfile.mkdtemp(prefix=VERSION+'-', dir=runtime_parent))
+    runtime = Path(tempfile.mkdtemp(prefix=VERSION + '-', dir=runtime_parent))
     for name in FILES:
-        shutil.copy2(source/name, runtime/name)
-    plist = Path.home()/'Library/LaunchAgents'/f'{LABEL}.plist'
+        shutil.copy2(source / name, runtime / name)
+    plist = Path.home() / 'Library/LaunchAgents' / f'{LABEL}.plist'
     plist.parent.mkdir(parents=True, exist_ok=True)
-    definition = {'Label': LABEL, 'ProgramArguments': [str(Path(sys.executable).resolve()),
-                  str(runtime/'direct_service.py'), '--root', str(root), '--codex', codex, 'run'],
-                  'RunAtLoad': True, 'KeepAlive': True, 'ThrottleInterval': 10,
-                  'WorkingDirectory': str(root),
-                  'StandardOutPath': str(root/'direct-service.log'),
-                  'StandardErrorPath': str(root/'direct-service-error.log'),
-                  'EnvironmentVariables': {'PATH': os.pathsep.join([str(Path(codex).parent), '/opt/homebrew/bin',
-                                           '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'])}}
+    definition = {
+        'Label': LABEL,
+        'ProgramArguments': [
+            str(Path(sys.executable).resolve()),
+            str(runtime / 'direct_service.py'),
+            '--root',
+            str(root),
+            '--codex',
+            codex,
+            'run',
+        ],
+        'RunAtLoad': True,
+        'KeepAlive': True,
+        'ThrottleInterval': 10,
+        'WorkingDirectory': str(root),
+        'StandardOutPath': str(root / 'direct-service.log'),
+        'StandardErrorPath': str(root / 'direct-service-error.log'),
+        'EnvironmentVariables': {
+            'PATH': os.pathsep.join(
+                [
+                    str(Path(codex).parent),
+                    '/opt/homebrew/bin',
+                    '/usr/local/bin',
+                    '/usr/bin',
+                    '/bin',
+                    '/usr/sbin',
+                    '/sbin',
+                ]
+            )
+        },
+    }
     if os.environ.get('CODEX_HOME'):
         definition['EnvironmentVariables']['CODEX_HOME'] = os.environ['CODEX_HOME']
     old = plistlib.loads(plist.read_bytes()) if plist.exists() else None
@@ -76,27 +115,37 @@ def _install(root=None, codex=None):
         # Leave unrelated launch agents entirely alone.
         if old.get('Label') != LABEL:
             raise RuntimeError('Conflicting launch agent definition')
-        result = subprocess.run(['launchctl', 'bootout', f'gui/{os.getuid()}/{LABEL}'], capture_output=True, timeout=15)
+        result = subprocess.run(
+            ['launchctl', 'bootout', f'gui/{os.getuid()}/{LABEL}'], capture_output=True, timeout=15
+        )
         if result.returncode and service_status()['loaded']:
             raise RuntimeError('Could not stop the previous direct worker')
     temp = plist.with_suffix('.tmp')
-    temp.write_bytes(plistlib.dumps(definition));temp.chmod(0o600);temp.replace(plist)
-    result = subprocess.run(['launchctl', 'bootstrap', f'gui/{os.getuid()}', str(plist)],
-                            capture_output=True, text=True, timeout=15)
+    temp.write_bytes(plistlib.dumps(definition))
+    temp.chmod(0o600)
+    temp.replace(plist)
+    result = subprocess.run(
+        ['launchctl', 'bootstrap', f'gui/{os.getuid()}', str(plist)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
     if result.returncode:
-        raise RuntimeError('launchd could not load the direct worker: '+result.stderr.strip())
+        raise RuntimeError('launchd could not load the direct worker: ' + result.stderr.strip())
     for _ in range(20):
         state = service_status(root)
         if state['loaded'] and state['pid']:
             return state
-        time.sleep(.1)
+        time.sleep(0.1)
     raise RuntimeError('Worker did not start; inspect direct-service-error.log')
 
 
 def ensure_service(root=None):
     state = service_status(root)
     if state['loaded'] and state['dataRoot'] != str(Path(root or root_path()).resolve()):
-        raise RuntimeError('The running worker uses another data directory; inspect its timers before changing it')
+        raise RuntimeError(
+            'The running worker uses another data directory; inspect its timers before changing it'
+        )
     if not state['loaded']:
         state = install(root)
     if not state['loaded']:
@@ -106,8 +155,9 @@ def ensure_service(root=None):
 
 def run(root, codex):
     from direct_host import Host
+
     store = DirectStore(root)
-    lock = (store.root/'direct-worker.lock').open('a')
+    lock = (store.root / 'direct-worker.lock').open('a')
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -115,9 +165,11 @@ def run(root, codex):
     store.recover(time.time())
     worker = Worker(store, Host(codex))
     stopping = False
+
     def stop(*_):
         nonlocal stopping
         stopping = True
+
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     print(json.dumps({'event': 'started', 'version': VERSION, 'pid': os.getpid()}), flush=True)
@@ -139,7 +191,8 @@ def main():
     parser.add_argument('--codex', default=None)
     sub = parser.add_subparsers(dest='command', required=True)
     sub.add_parser('install').add_argument('--force', action='store_true')
-    sub.add_parser('run');sub.add_parser('uninstall')
+    sub.add_parser('run')
+    sub.add_parser('uninstall')
     for name in ('enable', 'smoke', 'status', 'cancel'):
         command = sub.add_parser(name)
         command.add_argument('--thread', required=name != 'status')
@@ -152,26 +205,40 @@ def main():
     if args.codex:
         os.environ['RESUME_CODEX_EXECUTABLE'] = args.codex
     if args.command == 'run':
-        run(args.root, args.codex or executable());return
+        run(args.root, args.codex or executable())
+        return
     if args.command == 'install':
         result = install(args.root, args.codex, force=args.force)
     elif args.command == 'uninstall':
-        subprocess.run(['launchctl', 'bootout', f'gui/{os.getuid()}/{LABEL}'], capture_output=True, timeout=15)
-        plist = Path.home()/'Library/LaunchAgents'/f'{LABEL}.plist'
+        subprocess.run(
+            ['launchctl', 'bootout', f'gui/{os.getuid()}/{LABEL}'], capture_output=True, timeout=15
+        )
+        plist = Path.home() / 'Library/LaunchAgents' / f'{LABEL}.plist'
         if plist.exists():
             plist.unlink()
-        result = {'service': 'removed', 'savedTimers': 'retained but will not fire until service is installed'}
+        result = {
+            'service': 'removed',
+            'savedTimers': 'retained but will not fire until service is installed',
+        }
     else:
         store = DirectStore(args.root)
         if args.command == 'status':
-            result = {'service': service_status(args.root), 'job': store.status(args.thread) if args.thread else None}
+            result = {
+                'service': service_status(args.root),
+                'job': store.status(args.thread) if args.thread else None,
+            }
         elif args.command == 'cancel':
             result = store.cancel(args.thread)
         else:
             ensure_service(args.root)
             from direct_host import Host
-            result = store.enable(args.thread, args.instruction, Host(args.codex or executable()),
-                                  test_delay=args.delay if args.command == 'smoke' else None)
+
+            result = store.enable(
+                args.thread,
+                args.instruction,
+                Host(args.codex or executable()),
+                test_delay=args.delay if args.command == 'smoke' else None,
+            )
     print(json.dumps(result, indent=2))
 
 

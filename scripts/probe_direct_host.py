@@ -1,4 +1,5 @@
 """Read-only feasibility probe. Never starts a turn, resumes a chat, or creates a timer."""
+
 import argparse
 import json
 import os
@@ -12,8 +13,9 @@ class Client:
     ALLOWED = {'initialize', 'account/rateLimits/read', 'thread/read'}
 
     def __init__(self, command):
-        self.process = subprocess.Popen(command, stdin=subprocess.PIPE,
-                                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.process = subprocess.Popen(
+            command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+        )
         self.selector = selectors.DefaultSelector()
         self.selector.register(self.process.stdout, selectors.EVENT_READ)
         self.buffer = b''
@@ -35,7 +37,7 @@ class Client:
                     if 'error' in response:
                         raise RuntimeError(str(response['error']))
                     return response['result']
-            if self.selector.select(min(.25, max(0, end-time.monotonic()))):
+            if self.selector.select(min(0.25, max(0, end - time.monotonic()))):
                 chunk = os.read(self.process.stdout.fileno(), 65536)
                 if not chunk:
                     raise RuntimeError('Connection closed before response')
@@ -43,7 +45,9 @@ class Client:
         raise TimeoutError(method)
 
     def initialize(self):
-        self.call('initialize', {'clientInfo': {'name': 'resume_after_reset_probe', 'version': '0.1.0'}})
+        self.call(
+            'initialize', {'clientInfo': {'name': 'resume_after_reset_probe', 'version': '0.1.0'}}
+        )
         self.process.stdin.write(b'{"method":"initialized"}\n')
         self.process.stdin.flush()
 
@@ -61,8 +65,12 @@ class Client:
 
 
 def investigate(codex, thread):
-    report = {'modelTurnsStarted': 0, 'timersCreated': 0,
-              'liveDesktopAttach': False, 'safeAutomaticDeliveryVerified': False}
+    report = {
+        'modelTurnsStarted': 0,
+        'timersCreated': 0,
+        'liveDesktopAttach': False,
+        'safeAutomaticDeliveryVerified': False,
+    }
     proxy = Client([codex, 'app-server', 'proxy'])
     try:
         proxy.initialize()
@@ -80,16 +88,20 @@ def investigate(codex, thread):
         limits = usage.get('rateLimitsByLimitId') or {}
         report['freshUsageRead'] = True
         report['ordinaryUsageAllowed'] = usage.get('ordinaryUsageAllowed')
-        report['windows'] = {bucket: {key: value.get(key) for key in ('primary', 'secondary')}
-                             for bucket, value in limits.items()}
+        report['windows'] = {
+            bucket: {key: value.get(key) for key in ('primary', 'secondary')}
+            for bucket, value in limits.items()
+        }
         if thread:
             response = client.call('thread/read', {'threadId': thread, 'includeTurns': False})
             saved = response['thread']
             report['savedChatFound'] = saved['id'] == thread
             report['separateProcessChatStatus'] = saved.get('status')
-        report['conclusion'] = ('Fresh usage can be read without inference. Saved chat visibility '
-                                'does not establish live desktop attachment or safe concurrent delivery. '
-                                'Do not enable an autonomous writer from this probe result.')
+        report['conclusion'] = (
+            'Fresh usage can be read without inference. Saved chat visibility '
+            'does not establish live desktop attachment or safe concurrent delivery. '
+            'Do not enable an autonomous writer from this probe result.'
+        )
     except (RuntimeError, TimeoutError, OSError) as error:
         report['readProbeError'] = str(error)
     finally:
@@ -100,7 +112,9 @@ def investigate(codex, thread):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--codex', default=shutil.which('codex'))
-    parser.add_argument('--thread', help='Exact chat ID supplied by its user; no unrelated chats are searched')
+    parser.add_argument(
+        '--thread', help='Exact chat ID supplied by its user; no unrelated chats are searched'
+    )
     args = parser.parse_args()
     if not args.codex:
         parser.error('A Codex app-server executable is required')

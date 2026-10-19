@@ -1,0 +1,9 @@
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+extend-exclude = [".private", "benchmarks", "tests", "scripts/check_package.py"]
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
+line-ending = "lf"

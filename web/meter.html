@@ -1,25 +1,563 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Auto-Continue</title>
-<style>
-:root{color-scheme:light dark;--bg:light-dark(#f6f8fa,#11171c);--card:light-dark(#fff,#1b232a);--text:light-dark(#172c35,#edf4f5);--muted:light-dark(#61767e,#a0b0b6);--line:light-dark(#e2e9ec,#35444b);--empty:light-dark(#eaf0f2,#34434a);--green:light-dark(#139b72,#4bd4a7);--amber:light-dark(#bb780b,#f4be60);--red:light-dark(#ce4343,#ff8787)}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,sans-serif}.shell{max-width:760px;margin:auto;padding:24px}header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}h1{margin:0;font-size:21px;letter-spacing:-.6px}header p{margin:3px 0 0;color:var(--muted);font-size:12px}.badge{display:flex;align-items:center;gap:6px;padding:5px 9px;border-radius:20px;background:var(--card);font-size:11px;white-space:nowrap;border:1px solid var(--line)}.dot{width:6px;height:6px;background:var(--green);border-radius:50%}.badge[data-state="stale"] .dot{background:var(--amber)}main{display:grid;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));gap:14px;margin-top:22px}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;--level:var(--green)}.card[data-health="low"]{--level:var(--amber)}.card[data-health="critical"]{--level:var(--red)}.card-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.window{font-size:14px;font-weight:650}.used{font-size:12px;color:var(--muted)}.battery-wrap{margin:24px 8px 19px 0;position:relative}.battery{height:70px;border:3px solid var(--level);border-radius:12px;padding:5px;position:relative}.battery:after{content:"";position:absolute;width:7px;height:25px;background:var(--level);right:-10px;top:19px;border-radius:0 4px 4px 0}.track{height:100%;position:relative;background:var(--empty);border-radius:5px;overflow:hidden}.charge{height:100%;width:var(--remaining);background:var(--level);transition:width .55s ease}.ribs{position:absolute;inset:0;background:repeating-linear-gradient(to right,transparent 0,transparent calc(10% - 3px),var(--card) calc(10% - 3px),var(--card) 10%)}.numbers{display:flex;align-items:baseline;gap:7px}.percent{font-size:38px;line-height:1.15;font-weight:700;letter-spacing:-1.5px}.remaining-label{font-size:13px;color:var(--muted)}.reset{margin:12px 0 0;padding-top:13px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}.unknown .battery{border-color:var(--line)}.unknown .battery:after{background:var(--line)}.unknown .track{background:repeating-linear-gradient(135deg,var(--empty) 0,var(--empty) 7px,var(--card) 7px,var(--card) 14px)}footer{margin-top:18px;display:flex;justify-content:space-between;gap:10px;color:var(--muted);font-size:11px}.notice{margin:16px 0 0;color:var(--muted);font-size:12px}.empty{padding:28px 20px;background:var(--card);border-radius:16px;border:1px dashed var(--line);grid-column:1/-1}.empty strong{display:block;margin-bottom:7px}#error{font-size:12px;color:var(--amber);margin-bottom:0}@media(max-width:360px){.shell{padding:16px}header{display:block}.badge{display:inline-flex;margin-top:12px}}@media(prefers-reduced-motion:reduce){.charge{transition:none}}
-</style></head><body><div class="shell"><header><div><h1>Auto-Continue</h1><p>Continue this chat after your usage limit resets</p></div><span class="badge" id="connection" data-state="stale"><span class="dot"></span><span id="connection-label">Connecting</span></span></header><section class="shell" id="direct-controls" style="padding:0 0 16px"><div class="card"><h2 style="margin:0 0 8px;font-size:17px">Automatic continuation</h2><p id="direct-state" role="status">Connect this panel to the current chat to enable continuation.</p><label for="direct-instruction">Message to send after reset</label><textarea id="direct-instruction" rows="4" style="display:block;box-sizing:border-box;width:100%;margin:8px 0 12px;padding:10px;font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:8px" oninput="instructionEdited=true"></textarea><button id="direct-enable" type="button" onclick="enableDirect()" disabled>Enable for this chat</button> <button id="direct-cancel" type="button" onclick="cancelDirect()" disabled>Cancel timer</button><p class="notice">Sends the saved message once at the next reset plus one minute. Setup and waiting use local code. Starts a local background service; your Mac must be awake for delivery.</p></div></section><section class="shell" style="padding-top:0"><h2 style="font-size:17px">Optional usage meter</h2><main id="meter" aria-live="polite"></main><footer><span>Shared across all chats</span><span id="time">Waiting for a reading</span></footer><p class="notice" id="notice">Updates automatically while this panel is open.</p><p id="error" role="status"></p></section></div>
-<script>
-let thread=null,boundThread=null,instructionEdited=false,directBusy=false,id=0,inFlight=false,lastData=null;const pending=new Map();
-function request(method,params){return new Promise((resolve,reject)=>{const key=++id;const timer=setTimeout(()=>{pending.delete(key);reject(Error('The host has not responded. Keeping the last reading.'))},10000);pending.set(key,{resolve,reject,timer});parent.postMessage({jsonrpc:'2.0',id:key,method,params},'*')})}
-function el(tag,className,text){const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node}
-function windowName(w){return w.windowDurationMins===300?'5-hour allowance':w.windowDurationMins===10080?'Weekly allowance':w.windowDurationMins?`${w.windowDurationMins}-minute allowance`:w.window==='primary'?'Short window':'Long window'}
-function render(data){lastData=data;thread=data.thread||thread;renderDirect(data);const root=document.querySelector('#meter');root.replaceChildren();if(!data.meter){const empty=el('section','empty');empty.append(el('strong',null,'Connect the meter once'),el('span',null,'Ask “show my usage visually” in this chat. Then keep this panel open; it updates as you work. Automatic continuation does not need to be enabled.'));root.append(empty);updateStatus(data);return}for(const w of data.meter.windows){const known=typeof w.usedPercent==='number'&&Number.isFinite(w.usedPercent);const used=known?Math.max(0,Math.min(100,w.usedPercent)):null;const remaining=known?100-used:null;const card=el('section','card'+(known?'':' unknown'));card.dataset.health=remaining!==null&&remaining<=5?'critical':remaining!==null&&remaining<=20?'low':'normal';const head=el('div','card-head');head.append(el('span','window',windowName(w)),el('span','used',known?`${used}% used`:'No reading'));const wrap=el('div','battery-wrap');const battery=el('div','battery');battery.setAttribute('role','meter');battery.setAttribute('aria-label',windowName(w)+(known?` — ${remaining}% remaining, ${used}% used`:' — unavailable'));if(known){battery.setAttribute('aria-valuemin','0');battery.setAttribute('aria-valuemax','100');battery.setAttribute('aria-valuenow',String(remaining))}const track=el('div','track');const charge=el('div','charge');charge.style.setProperty('--remaining',known?`${remaining}%`:'0%');track.append(charge,el('div','ribs'));battery.append(track);wrap.append(battery);const numbers=el('div','numbers');numbers.append(el('span','percent',known?`${remaining}%`:'—'),el('span','remaining-label',known?'remaining':'unavailable'));const reset=el('p','reset',w.resetsAt?'Resets '+new Date(w.resetsAt*1000).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'Reset time unavailable');card.append(head,wrap,numbers,reset);root.append(card)}updateStatus(data)}
-function updateStatus(data){const age=data.observedAt?Math.max(0,Math.floor(Date.now()/1000-data.observedAt)):null;const fresh=age!==null&&age<=600&&!data.sourceError;document.querySelector('#connection').dataset.state=fresh?'fresh':'stale';document.querySelector('#connection-label').textContent=fresh?'Auto-updating':data.meter?'Waiting for activity':'Not connected';document.querySelector('#time').textContent=age===null?'No reading yet':age<60?'Updated just now':`Updated ${Math.floor(age/60)}m ago`;document.querySelector('#notice').textContent=data.automatic?'Refreshes automatically from desktop usage events. Readings arrive as you work.':'Automatic updates need local desktop usage events. The last reading stays visible.';}
-async function refresh(){if(inFlight||document.visibilityState==='hidden')return;inFlight=true;try{const result=await request('tools/call',{name:'resume_meter_state',arguments:thread?{thread}:{}});render(result.structuredContent||{});document.querySelector('#error').textContent=result.structuredContent?.sourceError?'Automatic readings are unavailable. Keeping the last reading.':''}catch(e){document.querySelector('#error').textContent=e.message}finally{inFlight=false}}
-addEventListener('message',event=>{if(event.source!==parent||!event.data||event.data.jsonrpc!=='2.0')return;const m=event.data;if(pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);clearTimeout(p.timer);m.error?p.reject(Error(m.error.message)):p.resolve(m.result)}if(m.method==='ui/notifications/tool-result')render(m.params?.structuredContent||{});if(m.method==='ui/notifications/tool-input'){boundThread=m.params?.arguments?.thread||boundThread;thread=boundThread||thread;if(lastData)renderDirect(lastData)}});
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='hidden')refresh()});
-setInterval(()=>{if(lastData)updateStatus(lastData);refresh()},5000);
-request('ui/initialize',{protocolVersion:'2026-01-26',appInfo:{name:'resume-meter',version:'1.0.0'},appCapabilities:{}}).then(()=>{parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized',params:{}},'*');refresh()}).catch(e=>document.querySelector('#error').textContent=e.message);
-const defaultInstruction="Resume the task that was stopped when the usage limit was reached in this chat. Continue from where it left off, preserving the user's instructions and ordinary permissions. If no work remains, report that briefly.";
-document.querySelector('#direct-instruction').value=defaultInstruction;
-function renderDirect(data){const job=data.thread===boundThread?data.directJob:null;const active=job&&['armed','checking','sending','uncertain'].includes(job.status);const area=document.querySelector('#direct-instruction');area.disabled=!!active||directBusy;if(job&&active&&typeof job.instruction==='string'){area.value=job.instruction}else if(!active&&!instructionEdited){area.value=defaultInstruction}document.querySelector('#direct-enable').disabled=!boundThread||directBusy||!!active;document.querySelector('#direct-cancel').disabled=!boundThread||directBusy||!job||!['armed','checking','uncertain'].includes(job.status);let message=!boundThread?'Ask “show my usage visually” in this chat once to connect its controls.':!job?'No timer is armed.':job.status==='queued'?`Message queued at ${new Date(job.accepted_at*1000).toLocaleString()}. Receipt: ${job.queue_id}`:job.status==='armed'?`Armed for ${new Date(job.due*1000).toLocaleString()}.`:`Timer status: ${job.status}${job.last_error?' — '+job.last_error:''}`;if(job&&active&&data.directService?.loaded===false)message+=' Background worker unavailable; open status to repair it.';document.querySelector('#direct-state').textContent=message}
-async function directCall(name,args){const result=await request('tools/call',{name,arguments:args});if(result.isError)throw Error(result.content?.find(x=>x.type==='text')?.text||'Scheduler request failed');return result.structuredContent||{}}
-async function enableDirect(){if(!boundThread||directBusy)return;directBusy=true;try{const result=await directCall('resume_direct_enable',{thread:boundThread,instruction:document.querySelector('#direct-instruction').value,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone});lastData={...(lastData||{}),thread:boundThread,directJob:result.job,directService:result.service};document.querySelector('#error').textContent=''}catch(e){document.querySelector('#error').textContent=e.message}finally{directBusy=false;renderDirect(lastData||{})}}
-async function cancelDirect(){if(!boundThread||directBusy)return;directBusy=true;try{const result=await directCall('resume_direct_cancel',{thread:boundThread});lastData={...(lastData||{}),thread:boundThread,directJob:result.job};document.querySelector('#error').textContent=''}catch(e){document.querySelector('#error').textContent=e.message}finally{directBusy=false;renderDirect(lastData||{})}}
-render({meter:null});
-</script></html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Auto-Continue</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: light-dark(#f6f8fa, #11171c);
+        --card: light-dark(#fff, #1b232a);
+        --text: light-dark(#172c35, #edf4f5);
+        --muted: light-dark(#61767e, #a0b0b6);
+        --line: light-dark(#e2e9ec, #35444b);
+        --empty: light-dark(#eaf0f2, #34434a);
+        --green: light-dark(#139b72, #4bd4a7);
+        --amber: light-dark(#bb780b, #f4be60);
+        --red: light-dark(#ce4343, #ff8787);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          14px/1.5 system-ui,
+          -apple-system,
+          sans-serif;
+      }
+      .shell {
+        max-width: 760px;
+        margin: auto;
+        padding: 24px;
+      }
+      header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 21px;
+        letter-spacing: -0.6px;
+      }
+      header p {
+        margin: 3px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .badge {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 9px;
+        border-radius: 20px;
+        background: var(--card);
+        font-size: 11px;
+        white-space: nowrap;
+        border: 1px solid var(--line);
+      }
+      .dot {
+        width: 6px;
+        height: 6px;
+        background: var(--green);
+        border-radius: 50%;
+      }
+      .badge[data-state='stale'] .dot {
+        background: var(--amber);
+      }
+      main {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(235px, 1fr));
+        gap: 14px;
+        margin-top: 22px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 20px;
+        --level: var(--green);
+      }
+      .card[data-health='low'] {
+        --level: var(--amber);
+      }
+      .card[data-health='critical'] {
+        --level: var(--red);
+      }
+      .card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .window {
+        font-size: 14px;
+        font-weight: 650;
+      }
+      .used {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .battery-wrap {
+        margin: 24px 8px 19px 0;
+        position: relative;
+      }
+      .battery {
+        height: 70px;
+        border: 3px solid var(--level);
+        border-radius: 12px;
+        padding: 5px;
+        position: relative;
+      }
+      .battery:after {
+        content: '';
+        position: absolute;
+        width: 7px;
+        height: 25px;
+        background: var(--level);
+        right: -10px;
+        top: 19px;
+        border-radius: 0 4px 4px 0;
+      }
+      .track {
+        height: 100%;
+        position: relative;
+        background: var(--empty);
+        border-radius: 5px;
+        overflow: hidden;
+      }
+      .charge {
+        height: 100%;
+        width: var(--remaining);
+        background: var(--level);
+        transition: width 0.55s ease;
+      }
+      .ribs {
+        position: absolute;
+        inset: 0;
+        background: repeating-linear-gradient(
+          to right,
+          transparent 0,
+          transparent calc(10% - 3px),
+          var(--card) calc(10% - 3px),
+          var(--card) 10%
+        );
+      }
+      .numbers {
+        display: flex;
+        align-items: baseline;
+        gap: 7px;
+      }
+      .percent {
+        font-size: 38px;
+        line-height: 1.15;
+        font-weight: 700;
+        letter-spacing: -1.5px;
+      }
+      .remaining-label {
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .reset {
+        margin: 12px 0 0;
+        padding-top: 13px;
+        border-top: 1px solid var(--line);
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .unknown .battery {
+        border-color: var(--line);
+      }
+      .unknown .battery:after {
+        background: var(--line);
+      }
+      .unknown .track {
+        background: repeating-linear-gradient(
+          135deg,
+          var(--empty) 0,
+          var(--empty) 7px,
+          var(--card) 7px,
+          var(--card) 14px
+        );
+      }
+      footer {
+        margin-top: 18px;
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .notice {
+        margin: 16px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .empty {
+        padding: 28px 20px;
+        background: var(--card);
+        border-radius: 16px;
+        border: 1px dashed var(--line);
+        grid-column: 1/-1;
+      }
+      .empty strong {
+        display: block;
+        margin-bottom: 7px;
+      }
+      #error {
+        font-size: 12px;
+        color: var(--amber);
+        margin-bottom: 0;
+      }
+      @media (max-width: 360px) {
+        .shell {
+          padding: 16px;
+        }
+        header {
+          display: block;
+        }
+        .badge {
+          display: inline-flex;
+          margin-top: 12px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .charge {
+          transition: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header>
+        <div>
+          <h1>Auto-Continue</h1>
+          <p>Continue this chat after your usage limit resets</p>
+        </div>
+        <span class="badge" id="connection" data-state="stale"
+          ><span class="dot"></span><span id="connection-label">Connecting</span></span
+        >
+      </header>
+      <section class="shell" id="direct-controls" style="padding: 0 0 16px">
+        <div class="card">
+          <h2 style="margin: 0 0 8px; font-size: 17px">Automatic continuation</h2>
+          <p id="direct-state" role="status">
+            Connect this panel to the current chat to enable continuation.
+          </p>
+          <label for="direct-instruction">Message to send after reset</label
+          ><textarea
+            id="direct-instruction"
+            rows="4"
+            style="
+              display: block;
+              box-sizing: border-box;
+              width: 100%;
+              margin: 8px 0 12px;
+              padding: 10px;
+              font: inherit;
+              color: var(--text);
+              background: var(--bg);
+              border: 1px solid var(--line);
+              border-radius: 8px;
+            "
+            oninput="instructionEdited = true"
+          ></textarea
+          ><button id="direct-enable" type="button" onclick="enableDirect()" disabled>
+            Enable for this chat
+          </button>
+          <button id="direct-cancel" type="button" onclick="cancelDirect()" disabled>
+            Cancel timer
+          </button>
+          <p class="notice">
+            Sends the saved message once at the next reset plus one minute. Setup and waiting use
+            local code. Starts a local background service; your Mac must be awake for delivery.
+          </p>
+        </div>
+      </section>
+      <section class="shell" style="padding-top: 0">
+        <h2 style="font-size: 17px">Optional usage meter</h2>
+        <main id="meter" aria-live="polite"></main>
+        <footer>
+          <span>Shared across all chats</span><span id="time">Waiting for a reading</span>
+        </footer>
+        <p class="notice" id="notice">Updates automatically while this panel is open.</p>
+        <p id="error" role="status"></p>
+      </section>
+    </div>
+    <script>
+      let thread = null,
+        boundThread = null,
+        instructionEdited = false,
+        directBusy = false,
+        id = 0,
+        inFlight = false,
+        lastData = null;
+      const pending = new Map();
+      function request(method, params) {
+        return new Promise((resolve, reject) => {
+          const key = ++id;
+          const timer = setTimeout(() => {
+            pending.delete(key);
+            reject(Error('The host has not responded. Keeping the last reading.'));
+          }, 10000);
+          pending.set(key, { resolve, reject, timer });
+          parent.postMessage({ jsonrpc: '2.0', id: key, method, params }, '*');
+        });
+      }
+      function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      }
+      function windowName(w) {
+        return w.windowDurationMins === 300
+          ? '5-hour allowance'
+          : w.windowDurationMins === 10080
+            ? 'Weekly allowance'
+            : w.windowDurationMins
+              ? `${w.windowDurationMins}-minute allowance`
+              : w.window === 'primary'
+                ? 'Short window'
+                : 'Long window';
+      }
+      function render(data) {
+        lastData = data;
+        thread = data.thread || thread;
+        renderDirect(data);
+        const root = document.querySelector('#meter');
+        root.replaceChildren();
+        if (!data.meter) {
+          const empty = el('section', 'empty');
+          empty.append(
+            el('strong', null, 'Connect the meter once'),
+            el(
+              'span',
+              null,
+              'Ask “show my usage visually” in this chat. Then keep this panel open; it updates as you work. Automatic continuation does not need to be enabled.',
+            ),
+          );
+          root.append(empty);
+          updateStatus(data);
+          return;
+        }
+        for (const w of data.meter.windows) {
+          const known = typeof w.usedPercent === 'number' && Number.isFinite(w.usedPercent);
+          const used = known ? Math.max(0, Math.min(100, w.usedPercent)) : null;
+          const remaining = known ? 100 - used : null;
+          const card = el('section', 'card' + (known ? '' : ' unknown'));
+          card.dataset.health =
+            remaining !== null && remaining <= 5
+              ? 'critical'
+              : remaining !== null && remaining <= 20
+                ? 'low'
+                : 'normal';
+          const head = el('div', 'card-head');
+          head.append(
+            el('span', 'window', windowName(w)),
+            el('span', 'used', known ? `${used}% used` : 'No reading'),
+          );
+          const wrap = el('div', 'battery-wrap');
+          const battery = el('div', 'battery');
+          battery.setAttribute('role', 'meter');
+          battery.setAttribute(
+            'aria-label',
+            windowName(w) +
+              (known ? ` — ${remaining}% remaining, ${used}% used` : ' — unavailable'),
+          );
+          if (known) {
+            battery.setAttribute('aria-valuemin', '0');
+            battery.setAttribute('aria-valuemax', '100');
+            battery.setAttribute('aria-valuenow', String(remaining));
+          }
+          const track = el('div', 'track');
+          const charge = el('div', 'charge');
+          charge.style.setProperty('--remaining', known ? `${remaining}%` : '0%');
+          track.append(charge, el('div', 'ribs'));
+          battery.append(track);
+          wrap.append(battery);
+          const numbers = el('div', 'numbers');
+          numbers.append(
+            el('span', 'percent', known ? `${remaining}%` : '—'),
+            el('span', 'remaining-label', known ? 'remaining' : 'unavailable'),
+          );
+          const reset = el(
+            'p',
+            'reset',
+            w.resetsAt
+              ? 'Resets ' +
+                  new Date(w.resetsAt * 1000).toLocaleString(undefined, {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                  })
+              : 'Reset time unavailable',
+          );
+          card.append(head, wrap, numbers, reset);
+          root.append(card);
+        }
+        updateStatus(data);
+      }
+      function updateStatus(data) {
+        const age = data.observedAt
+          ? Math.max(0, Math.floor(Date.now() / 1000 - data.observedAt))
+          : null;
+        const fresh = age !== null && age <= 600 && !data.sourceError;
+        document.querySelector('#connection').dataset.state = fresh ? 'fresh' : 'stale';
+        document.querySelector('#connection-label').textContent = fresh
+          ? 'Auto-updating'
+          : data.meter
+            ? 'Waiting for activity'
+            : 'Not connected';
+        document.querySelector('#time').textContent =
+          age === null
+            ? 'No reading yet'
+            : age < 60
+              ? 'Updated just now'
+              : `Updated ${Math.floor(age / 60)}m ago`;
+        document.querySelector('#notice').textContent = data.automatic
+          ? 'Refreshes automatically from desktop usage events. Readings arrive as you work.'
+          : 'Automatic updates need local desktop usage events. The last reading stays visible.';
+      }
+      async function refresh() {
+        if (inFlight || document.visibilityState === 'hidden') return;
+        inFlight = true;
+        try {
+          const result = await request('tools/call', {
+            name: 'resume_meter_state',
+            arguments: thread ? { thread } : {},
+          });
+          render(result.structuredContent || {});
+          document.querySelector('#error').textContent = result.structuredContent?.sourceError
+            ? 'Automatic readings are unavailable. Keeping the last reading.'
+            : '';
+        } catch (e) {
+          document.querySelector('#error').textContent = e.message;
+        } finally {
+          inFlight = false;
+        }
+      }
+      addEventListener('message', (event) => {
+        if (event.source !== parent || !event.data || event.data.jsonrpc !== '2.0') return;
+        const m = event.data;
+        if (pending.has(m.id)) {
+          const p = pending.get(m.id);
+          pending.delete(m.id);
+          clearTimeout(p.timer);
+          m.error ? p.reject(Error(m.error.message)) : p.resolve(m.result);
+        }
+        if (m.method === 'ui/notifications/tool-result') render(m.params?.structuredContent || {});
+        if (m.method === 'ui/notifications/tool-input') {
+          boundThread = m.params?.arguments?.thread || boundThread;
+          thread = boundThread || thread;
+          if (lastData) renderDirect(lastData);
+        }
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'hidden') refresh();
+      });
+      setInterval(() => {
+        if (lastData) updateStatus(lastData);
+        refresh();
+      }, 5000);
+      request('ui/initialize', {
+        protocolVersion: '2026-01-26',
+        appInfo: { name: 'resume-meter', version: '1.0.0' },
+        appCapabilities: {},
+      })
+        .then(() => {
+          parent.postMessage(
+            { jsonrpc: '2.0', method: 'ui/notifications/initialized', params: {} },
+            '*',
+          );
+          refresh();
+        })
+        .catch((e) => (document.querySelector('#error').textContent = e.message));
+      const defaultInstruction =
+        "Resume the task that was stopped when the usage limit was reached in this chat. Continue from where it left off, preserving the user's instructions and ordinary permissions. If no work remains, report that briefly.";
+      document.querySelector('#direct-instruction').value = defaultInstruction;
+      function renderDirect(data) {
+        const job = data.thread === boundThread ? data.directJob : null;
+        const active = job && ['armed', 'checking', 'sending', 'uncertain'].includes(job.status);
+        const area = document.querySelector('#direct-instruction');
+        area.disabled = !!active || directBusy;
+        if (job && active && typeof job.instruction === 'string') {
+          area.value = job.instruction;
+        } else if (!active && !instructionEdited) {
+          area.value = defaultInstruction;
+        }
+        document.querySelector('#direct-enable').disabled = !boundThread || directBusy || !!active;
+        document.querySelector('#direct-cancel').disabled =
+          !boundThread ||
+          directBusy ||
+          !job ||
+          !['armed', 'checking', 'uncertain'].includes(job.status);
+        let message = !boundThread
+          ? 'Ask “show my usage visually” in this chat once to connect its controls.'
+          : !job
+            ? 'No timer is armed.'
+            : job.status === 'queued'
+              ? `Message queued at ${new Date(job.accepted_at * 1000).toLocaleString()}. Receipt: ${job.queue_id}`
+              : job.status === 'armed'
+                ? `Armed for ${new Date(job.due * 1000).toLocaleString()}.`
+                : `Timer status: ${job.status}${job.last_error ? ' — ' + job.last_error : ''}`;
+        if (job && active && data.directService?.loaded === false)
+          message += ' Background worker unavailable; open status to repair it.';
+        document.querySelector('#direct-state').textContent = message;
+      }
+      async function directCall(name, args) {
+        const result = await request('tools/call', { name, arguments: args });
+        if (result.isError)
+          throw Error(
+            result.content?.find((x) => x.type === 'text')?.text || 'Scheduler request failed',
+          );
+        return result.structuredContent || {};
+      }
+      async function enableDirect() {
+        if (!boundThread || directBusy) return;
+        directBusy = true;
+        try {
+          const result = await directCall('resume_direct_enable', {
+            thread: boundThread,
+            instruction: document.querySelector('#direct-instruction').value,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          });
+          lastData = {
+            ...(lastData || {}),
+            thread: boundThread,
+            directJob: result.job,
+            directService: result.service,
+          };
+          document.querySelector('#error').textContent = '';
+        } catch (e) {
+          document.querySelector('#error').textContent = e.message;
+        } finally {
+          directBusy = false;
+          renderDirect(lastData || {});
+        }
+      }
+      async function cancelDirect() {
+        if (!boundThread || directBusy) return;
+        directBusy = true;
+        try {
+          const result = await directCall('resume_direct_cancel', { thread: boundThread });
+          lastData = { ...(lastData || {}), thread: boundThread, directJob: result.job };
+          document.querySelector('#error').textContent = '';
+        } catch (e) {
+          document.querySelector('#error').textContent = e.message;
+        } finally {
+          directBusy = false;
+          renderDirect(lastData || {});
+        }
+      }
+      render({ meter: null });
+    </script>
+  </body>
+</html>

@@ -1,4 +1,5 @@
 """Durable timers. No model turn is used to register, wait, check usage, or enqueue."""
+
 import contextlib
 import json
 import math
@@ -9,15 +10,23 @@ import time
 import uuid
 from direct_host import Host, thread_id
 
-DEFAULT_INSTRUCTION = ('Resume the task that was stopped when the usage limit was reached in this chat. '
-                       'Continue from where it left off, preserving the user\'s instructions and ordinary '
-                       'permissions. If no work remains, report that briefly.')
+DEFAULT_INSTRUCTION = (
+    'Resume the task that was stopped when the usage limit was reached in this chat. '
+    "Continue from where it left off, preserving the user's instructions and ordinary "
+    'permissions. If no work remains, report that briefly.'
+)
 ACTIVE = ('armed', 'checking', 'sending', 'uncertain')
 
 
 def root_path():
-    return Path(os.environ.get('RESUME_AFTER_RESET_DATA') or
-                Path.home()/'.local/share/resume-after-reset').expanduser().resolve()
+    return (
+        Path(
+            os.environ.get('RESUME_AFTER_RESET_DATA')
+            or Path.home() / '.local/share/resume-after-reset'
+        )
+        .expanduser()
+        .resolve()
+    )
 
 
 def finite(value):
@@ -45,14 +54,14 @@ class DirectStore:
     def __init__(self, root=None):
         self.root = Path(root or root_path()).resolve()
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.db = self.root/'direct.sqlite3'
+        self.db = self.root / 'direct.sqlite3'
         with self.connect() as c:
-            c.executescript('''CREATE TABLE IF NOT EXISTS direct_jobs (
+            c.executescript("""CREATE TABLE IF NOT EXISTS direct_jobs (
               thread TEXT PRIMARY KEY, generation TEXT NOT NULL, instruction TEXT NOT NULL,
               account TEXT NOT NULL, bucket TEXT NOT NULL, due REAL NOT NULL, expires REAL NOT NULL,
               status TEXT NOT NULL, retries INTEGER NOT NULL DEFAULT 0, updated REAL NOT NULL,
               queue_id TEXT, accepted_at REAL, last_error TEXT, is_test INTEGER NOT NULL DEFAULT 0);
-              CREATE TABLE IF NOT EXISTS direct_leases (account TEXT PRIMARY KEY, until REAL NOT NULL);''')
+              CREATE TABLE IF NOT EXISTS direct_leases (account TEXT PRIMARY KEY, until REAL NOT NULL);""")
         self.db.chmod(0o600)
 
     @contextlib.contextmanager
@@ -85,9 +94,9 @@ class DirectStore:
                 return existing  # No usage read for identical repeated enablement.
             raise ValueError('Cancel the existing registration or inspect uncertain delivery first')
         # Prevent accidental parallel registration through the legacy native scheduler.
-        legacy = self.root/'state.sqlite3'
+        legacy = self.root / 'state.sqlite3'
         if legacy.exists():
-            with contextlib.closing(sqlite3.connect(legacy.as_uri()+'?mode=ro', uri=True)) as c:
+            with contextlib.closing(sqlite3.connect(legacy.as_uri() + '?mode=ro', uri=True)) as c:
                 row = c.execute('SELECT status FROM jobs WHERE thread=?', (thread,)).fetchone()
             if row and row[0] in ('armed', 'delivering', 'uncertain'):
                 raise ValueError('Disable the existing native registration before direct setup')
@@ -96,7 +105,9 @@ class DirectStore:
         now = time.time() if now is None else now
         account = snapshot.get('accountId')
         buckets = snapshot.get('rateLimitsByLimitId') or {}
-        bucket = 'codex' if 'codex' in buckets else next(iter(buckets)) if len(buckets) == 1 else None
+        bucket = (
+            'codex' if 'codex' in buckets else next(iter(buckets)) if len(buckets) == 1 else None
+        )
         if not isinstance(account, str) or not account or not bucket:
             raise ValueError('Account or applicable usage bucket is unavailable')
         if test_delay is not None:
@@ -105,7 +116,7 @@ class DirectStore:
             due = now + test_delay
         else:
             due = reset_time(snapshot, bucket, now)
-        if due >= now+8*86400:
+        if due >= now + 8 * 86400:
             raise ValueError('Reset exceeds the eight-day registration lifetime')
         with self.connect() as c:
             old = c.execute('SELECT * FROM direct_jobs WHERE thread=?', (thread,)).fetchone()
@@ -113,11 +124,23 @@ class DirectStore:
                 if old['instruction'] == instruction and old['status'] != 'uncertain':
                     return dict(old)
                 raise ValueError('Registration changed while obtaining usage')
-            c.execute('INSERT OR REPLACE INTO direct_jobs '
-                      '(thread,generation,instruction,account,bucket,due,expires,status,updated,is_test) '
-                      'VALUES (?,?,?,?,?,?,?,?,?,?)',
-                      (thread, uuid.uuid4().hex, instruction, account, bucket, due, now+8*86400,
-                       'armed', now, int(test_delay is not None)))
+            c.execute(
+                'INSERT OR REPLACE INTO direct_jobs '
+                '(thread,generation,instruction,account,bucket,due,expires,status,updated,is_test) '
+                'VALUES (?,?,?,?,?,?,?,?,?,?)',
+                (
+                    thread,
+                    uuid.uuid4().hex,
+                    instruction,
+                    account,
+                    bucket,
+                    due,
+                    now + 8 * 86400,
+                    'armed',
+                    now,
+                    int(test_delay is not None),
+                ),
+            )
         return self.status(thread)
 
     def cancel(self, thread):
@@ -125,43 +148,82 @@ class DirectStore:
         with self.connect() as c:
             job = c.execute('SELECT * FROM direct_jobs WHERE thread=?', (thread,)).fetchone()
             if job and job['status'] in ('sending', 'queued'):
-                raise ValueError('Message is being queued or already queued; it cannot be retracted here')
-            c.execute('UPDATE direct_jobs SET status="disabled",updated=? WHERE thread=?', (time.time(), thread))
+                raise ValueError(
+                    'Message is being queued or already queued; it cannot be retracted here'
+                )
+            c.execute(
+                'UPDATE direct_jobs SET status="disabled",updated=? WHERE thread=?',
+                (time.time(), thread),
+            )
         return self.status(thread)
 
     def recover(self, now):
         # Called only after obtaining the worker's exclusive OS lock.
         with self.connect() as c:
-            c.execute('UPDATE direct_jobs SET status="uncertain",last_error="worker_interrupted_during_queue",'
-                      'updated=? WHERE status="sending"', (now,))
-            c.execute('UPDATE direct_jobs SET status="armed",updated=? WHERE status="checking"', (now,))
+            c.execute(
+                'UPDATE direct_jobs SET status="uncertain",last_error="worker_interrupted_during_queue",'
+                'updated=? WHERE status="sending"',
+                (now,),
+            )
+            c.execute(
+                'UPDATE direct_jobs SET status="armed",updated=? WHERE status="checking"', (now,)
+            )
 
     def claim(self, now):
         with self.connect() as c:
-            c.execute('UPDATE direct_jobs SET status="expired",updated=? WHERE status="armed" AND expires<=?', (now, now))
-            job = c.execute('SELECT * FROM direct_jobs WHERE status="armed" AND due<=? ORDER BY due LIMIT 1', (now,)).fetchone()
+            c.execute(
+                'UPDATE direct_jobs SET status="expired",updated=? WHERE status="armed" AND expires<=?',
+                (now, now),
+            )
+            job = c.execute(
+                'SELECT * FROM direct_jobs WHERE status="armed" AND due<=? ORDER BY due LIMIT 1',
+                (now,),
+            ).fetchone()
             if not job:
                 return None
-            lease = c.execute('SELECT until FROM direct_leases WHERE account=?', (job['account'],)).fetchone()
+            lease = c.execute(
+                'SELECT until FROM direct_leases WHERE account=?', (job['account'],)
+            ).fetchone()
             if lease and lease[0] > now:
                 c.execute('UPDATE direct_jobs SET due=? WHERE thread=?', (lease[0], job['thread']))
                 return None
-            c.execute('UPDATE direct_jobs SET status="checking",updated=? WHERE thread=?', (now, job['thread']))
+            c.execute(
+                'UPDATE direct_jobs SET status="checking",updated=? WHERE thread=?',
+                (now, job['thread']),
+            )
             return dict(job)
 
     def update(self, job, status, now, error=None, due=None, retry=False, queue_id=None):
         with self.connect() as c:
-            c.execute('UPDATE direct_jobs SET status=?,updated=?,last_error=?,due=COALESCE(?,due),'
-                      'retries=retries+?,queue_id=COALESCE(?,queue_id),accepted_at=CASE WHEN ? IS NOT NULL '
-                      'THEN ? ELSE accepted_at END WHERE thread=? AND generation=? AND status IN ("checking","sending")',
-                      (status, now, error, due, int(retry), queue_id, queue_id, now, job['thread'], job['generation']))
+            c.execute(
+                'UPDATE direct_jobs SET status=?,updated=?,last_error=?,due=COALESCE(?,due),'
+                'retries=retries+?,queue_id=COALESCE(?,queue_id),accepted_at=CASE WHEN ? IS NOT NULL '
+                'THEN ? ELSE accepted_at END WHERE thread=? AND generation=? AND status IN ("checking","sending")',
+                (
+                    status,
+                    now,
+                    error,
+                    due,
+                    int(retry),
+                    queue_id,
+                    queue_id,
+                    now,
+                    job['thread'],
+                    job['generation'],
+                ),
+            )
 
     def begin_send(self, job, now):
         with self.connect() as c:
-            cursor = c.execute('UPDATE direct_jobs SET status="sending",updated=? WHERE thread=? AND generation=? '
-                               'AND status="checking" AND expires>?', (now, job['thread'], job['generation'], now))
+            cursor = c.execute(
+                'UPDATE direct_jobs SET status="sending",updated=? WHERE thread=? AND generation=? '
+                'AND status="checking" AND expires>?',
+                (now, job['thread'], job['generation'], now),
+            )
             if cursor.rowcount:
-                c.execute('INSERT OR REPLACE INTO direct_leases VALUES (?,?)', (job['account'], now+120))
+                c.execute(
+                    'INSERT OR REPLACE INTO direct_leases VALUES (?,?)', (job['account'], now + 120)
+                )
             return bool(cursor.rowcount)
 
 
@@ -174,9 +236,15 @@ class Worker:
         if not known_reset and job['retries'] >= 3:
             self.store.update(job, 'failed', now, reason)
             return
-        due = due if known_reset else now+60*(2**job['retries'])
-        self.store.update(job, 'expired' if due >= job['expires'] else 'armed', now,
-                          reason, due, retry=not known_reset)
+        due = due if known_reset else now + 60 * (2 ** job['retries'])
+        self.store.update(
+            job,
+            'expired' if due >= job['expires'] else 'armed',
+            now,
+            reason,
+            due,
+            retry=not known_reset,
+        )
 
     def tick(self, now=None):
         now = time.time() if now is None else now
@@ -197,11 +265,16 @@ class Worker:
         windows = [reading['primary'] if isinstance(reading.get('primary'), dict) else {}]
         if reading.get('secondary') is not None:
             windows.append(reading['secondary'] if isinstance(reading['secondary'], dict) else {})
-        allowed = (snapshot.get('ordinaryUsageAllowed') is True and not reading.get('rateLimitReachedType')
-                   and all(finite(w.get('usedPercent')) and 0 <= w['usedPercent'] < 100 for w in windows))
+        allowed = (
+            snapshot.get('ordinaryUsageAllowed') is True
+            and not reading.get('rateLimitReachedType')
+            and all(finite(w.get('usedPercent')) and 0 <= w['usedPercent'] < 100 for w in windows)
+        )
         if not allowed:
             try:
-                exhausted = any(finite(w.get('usedPercent')) and w['usedPercent'] >= 100 for w in windows)
+                exhausted = any(
+                    finite(w.get('usedPercent')) and w['usedPercent'] >= 100 for w in windows
+                )
                 due = reset_time(snapshot, job['bucket'], now) if exhausted else None
             except ValueError:
                 due = None

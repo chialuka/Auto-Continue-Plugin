@@ -36,6 +36,18 @@ python3 scripts/direct_service.py status --thread YOUR_CHAT_UUID
 
 The daemon runs from a private runtime snapshot outside the plugin cache. Timers live in `~/.local/share/resume-after-reset/direct.sqlite3`. The launch agent is `~/Library/LaunchAgents/local.resume-after-reset.direct.plist`. No API key is required. The bundled Codex executable must support app-server usage reads and `queue`.
 
+## Contributing
+
+Install the pinned Python formatter and check the Python source:
+
+```sh
+python3 -m pip install -r requirements-dev.txt
+ruff format hooks scripts
+ruff format --check hooks scripts
+```
+
+Ruff formats the Python server and worker code. JSON, Markdown, and HTML files are maintained in the repository's existing style.
+
 ## Reliability and states
 
 - `armed`: saved timer waiting for its due time.
