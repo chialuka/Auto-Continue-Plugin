@@ -1,0 +1,30 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "resume-after-reset-mvp",
+  "version": "1.0.2",
+  "description": "Local desktop plugin for persisted continuation registration, account usage warnings and a usage meter.",
+  "author": {
+    "name": "Local prototype"
+  },
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Resume After Reset MVP",
+        "shortDescription": "Usage meter and chat resume",
+        "longDescription": "Account usage meter and direct continuation at the next reset plus one minute. A local macOS service reads usage and queues the saved instruction into the same chat without model inference during setup or waiting. Includes enable, cancel and timer status controls.",
+        "developerName": "Local prototype",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write",
+          "Interactive"
+        ],
+        "defaultPrompt": [
+          "Enable continuation after the next usage reset in this chat.",
+          "When is this chat scheduled to resume?"
+        ]
+      },
+      "hooks": "./hooks/hooks.json"
+    }
+  }
+}
