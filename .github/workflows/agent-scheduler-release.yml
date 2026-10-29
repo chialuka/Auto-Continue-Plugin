@@ -1,0 +1,65 @@
+name: Agent Scheduler release
+
+on:
+  push:
+    tags:
+      - "scheduler-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: linux
+            goarch: amd64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+      - name: Build connector
+        working-directory: scheduler-v2
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          suffix=""
+          if [ "$GOOS" = "windows" ]; then suffix=".exe"; fi
+          go build -trimpath -ldflags="-s -w" -o "../dist/agent-scheduler-${GOOS}-${GOARCH}${suffix}" ./cmd/agent-scheduler
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-scheduler-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/agent-scheduler-*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create checksums and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          cd dist
+          sha256sum agent-scheduler-* > SHASUMS256.txt
+          gh release create "$TAG_NAME" agent-scheduler-* SHASUMS256.txt --verify-tag --generate-notes

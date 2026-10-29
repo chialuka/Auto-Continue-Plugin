@@ -1,0 +1,33 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "agent-scheduler-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-25",
+  "observability": { "enabled": true },
+  "ratelimits": [
+    {
+      "name": "ENROLL_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 10, "period": 60 }
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "agent-scheduler",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "DEVICE_STREAM", "class_name": "DeviceStream" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DeviceStream"] }],
+  "workflows": [
+    {
+      "name": "job-delivery",
+      "binding": "DELIVERY_WORKFLOW",
+      "class_name": "DeliveryWorkflow"
+    }
+  ]
+}

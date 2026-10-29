@@ -1,7 +1,6 @@
 """Durable timers. No model turn is used to register, wait, check usage, or enqueue."""
 
 import contextlib
-import json
 import math
 import os
 from pathlib import Path

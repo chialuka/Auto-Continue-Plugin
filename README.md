@@ -1,6 +1,6 @@
 # Auto-Continue
 
-A local macOS plugin that queues your saved continuation instruction into the same Codex chat at the next reset plus one minute.
+A plugin that schedules the saved continuation instruction for delivery into the same Codex chat one minute after the next usage reset. The cross-platform `agent-scheduler` connector handles timing and delivery.
 
 ## Use it
 
@@ -8,7 +8,7 @@ After installing, invoke the plugin in the chat you want to resume and say:
 
 > Enable continuation after my next usage reset in this chat.
 
-The agent makes one `resume_direct_enable` call. Code reads the reset timestamp, adds one minute, saves the generic interrupted-task instruction, and arms the local worker. The agent returns one short confirmation with the exact local time. It does not resume your task during setup. If you want a custom message delivered later, include it explicitly in the request.
+The agent makes one `schedule_auto_continue` call. The connector reads the reset timestamp locally, adds one minute, and saves the generic interrupted-task instruction. After success, the agent stops without a separate confirmation message. It does not inspect or implement the task during setup. If you explicitly provide a custom instruction, that message is saved and delivered later.
 
 Opening a usage panel is not required. Its controls remain an optional convenience. Chat invocation starts a model turn; skill instructions can minimize the work, but cannot force zero hidden reasoning or select a separate setup model. Waiting, quota checks and queue submission use local code without inference.
 
@@ -20,21 +20,28 @@ After the owner publishes this repository, other users can add its repo marketpl
 
 ```sh
 codex plugin marketplace add YOUR_ACCOUNT/YOUR_REPOSITORY
-codex plugin add resume-after-reset-mvp@resume-after-reset-community
+codex plugin add auto-continue@auto-continue-community
 ```
 
 This is manual repository distribution, separate from OpenAI directory approval.
 
-The source stays in this folder. Register it using `python3 scripts/install_local.py`, then install/update through the host plugin manager or `codex plugin add resume-after-reset-mvp@local-codex-plugins`. Refresh the desktop plugin view if it still shows an older version. Do not edit version caches.
+The source stays in this folder. Register it using `python3 scripts/install_local.py`, then install/update through the host plugin manager or `codex plugin add auto-continue@local-codex-plugins`. Refresh the desktop plugin view if it still shows an older version. Do not edit version caches.
 
-The service can be installed by the enable button, or explicitly with:
+The connector installer is being built as one interactive `npx` flow. It will
+ask which agents to configure, then install the skill and update their MCP
+settings while setting up the background connector. The installer source and
+release packaging are in progress under [`scheduler-v2/`](scheduler-v2/).
+
+Until its npm package and first binary release are published, local developers
+can build the connector from source with Go 1.26 or newer:
 
 ```sh
-python3 scripts/direct_service.py install
-python3 scripts/direct_service.py status --thread YOUR_CHAT_UUID
+cd scheduler-v2
+go build -o agent-scheduler ./cmd/agent-scheduler
+./agent-scheduler setup --url https://scheduler.example.com
 ```
 
-The daemon runs from a private runtime snapshot outside the plugin cache. Timers live in `~/.local/share/resume-after-reset/direct.sqlite3`. The launch agent is `~/Library/LaunchAgents/local.resume-after-reset.direct.plist`. No API key is required. The bundled Codex executable must support app-server usage reads and `queue`.
+Setup enrolls the device, installs the background connector, and configures the scheduler MCP server in Codex. The message and real chat reference stay on the device; the server receives opaque delivery metadata. The Codex CLI must support app-server usage reads and `queue`. Connector implementation and Cloudflare deployment instructions are in [`scheduler-v2/README.md`](scheduler-v2/README.md).
 
 ## Contributing
 
@@ -48,28 +55,26 @@ ruff format --check hooks scripts
 
 Ruff formats the Python server and worker code. JSON, Markdown, and HTML files are maintained in the repository's existing style.
 
-## Reliability and states
+## Scheduler behavior
 
-- `armed`: saved timer waiting for its due time.
-- `checking`: worker is checking fresh usage without inference.
-- `sending`: worker has committed to one queue attempt.
-- `queued`: CLI accepted the message; `queue_id` is the receipt. This does not mean the task completed.
-- `disabled`, `expired`, `failed`: will not send automatically.
-- `uncertain`: the queue may have accepted the message, but the receipt was lost or the worker crashed during sending. Never replay automatically; inspect before explicitly cancelling/rearming.
+Auto-Continue uses the same local message store and delivery worker as scheduled
+messages. The connector reads Codex usage when scheduling, saves the message for
+one minute after the applicable reset, and queues it when due. The setup turn
+only schedules; the task begins in the later agent turn. Message content and
+real chat references remain on the device. The server stores opaque job
+metadata and sends a wake signal.
 
-An exclusive worker lock and transactional claim prevent duplicate sends. Cancellation during a usage read prevents delivery. Once sending begins, cancellation cannot retract the message. Account identity is checked at delivery, blocking windows postpone the timer, unknown readings get three bounded retries, and registrations expire after eight days. Multiple chats on the same account are staggered by two minutes.
+The connector provides `list_scheduled_messages` and
+`cancel_scheduled_message` for inspection and cancellation. An uncertain
+delivery is never replayed automatically. Device retries are scheduled at
+`+1, +3, +6, +10, +15 minutes`; an offline connector receives the job when it
+reconnects, while the job remains valid.
 
-The worker restarts through launchd, and persisted overdue timers are considered after restart or waking. It cannot execute while the Mac is asleep, powered off, or logged out. Real exhausted-quota recovery and physical sleep/wake require natural-condition acceptance testing; timer/queue smoke tests do not prove those cases.
+## Legacy prototype
 
-## Removal
-
-To cancel a pending direct timer, use its panel button, `resume_direct_cancel`, or `python3 scripts/direct_service.py cancel --thread YOUR_CHAT_UUID`. To remove the worker without deleting history, run `python3 scripts/direct_service.py uninstall`; retained timers will not fire until it is installed again. Uninstalling the plugin through the host does not automatically remove the independent launch agent, so remove the service too.
-
-## Existing native timers
-
-Legacy native scheduling tools remain available for older registrations. Direct setup refuses to arm a chat that has an active native registration, and native setup refuses an active direct registration. Existing native automation prompts remain snapshots from their creation time. Disable an old native timer explicitly before moving that chat to direct scheduling.
-
-The optional meter reads local quota events for display. Its passive values are never used to authorize delivery. For older native registrations, use the compatibility instructions in the plugin skill.
+The older Python/macOS implementation remains in `scripts/` for compatibility,
+but the Auto-Continue skill now schedules through the Go `agent-scheduler`
+connector. Do not enable both implementations for the same chat.
 
 ## Public source and directory submission
 

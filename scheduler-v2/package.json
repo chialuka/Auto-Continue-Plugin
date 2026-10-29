@@ -1,0 +1,16 @@
+{
+  "name": "@chialuka/agent-scheduler-setup",
+  "version": "0.1.0",
+  "description": "Install Agent Scheduler and configure supported agent sessions",
+  "type": "module",
+  "bin": {
+    "agent-scheduler-setup": "installer/index.mjs"
+  },
+  "files": [
+    "installer/**",
+    "skills/agent-scheduler/SKILL.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

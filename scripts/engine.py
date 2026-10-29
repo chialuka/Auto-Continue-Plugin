@@ -1,7 +1,6 @@
 """Local durable state. Desktop host owns inference and heartbeat scheduling."""
 
 import contextlib
-import datetime as dt
 import json
 import math
 import os

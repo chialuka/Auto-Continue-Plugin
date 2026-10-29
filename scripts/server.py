@@ -167,7 +167,7 @@ def handle(message, store):
         return {
             'protocolVersion': params.get('protocolVersion', '2024-11-05'),
             'capabilities': {'tools': {}, 'resources': {}},
-            'serverInfo': {'name': 'resume-after-reset', 'version': '1.0.2'},
+            'serverInfo': {'name': 'auto-continue', 'version': '1.0.4'},
         }
     if method == 'ping':
         return {}

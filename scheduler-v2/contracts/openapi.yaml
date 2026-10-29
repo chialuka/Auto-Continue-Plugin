@@ -1,0 +1,181 @@
+openapi: 3.1.0
+info:
+  title: Agent Scheduler Device API
+  version: 0.1.0
+  description: >-
+    Device API for opaque scheduled-job metadata. Message content, provider names,
+    credentials, and real agent session IDs remain on the device.
+servers:
+  - url: https://scheduler.example.invalid
+security:
+  - deviceToken: []
+paths:
+  /v1/enroll:
+    post:
+      operationId: enrollDevice
+      summary: Create a pseudonymous user and register the first device
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties: {}
+      responses:
+        '201':
+          description: Device created; the bearer token is returned once
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [userId, deviceId, deviceToken]
+                properties:
+                  userId: { type: string, format: uuid }
+                  deviceId: { type: string, format: uuid }
+                  deviceToken: { type: string }
+  /v1/jobs:
+    post:
+      operationId: createJob
+      summary: Register an opaque scheduled job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateJob'
+      responses:
+        '201':
+          description: Job registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerJob'
+        '409':
+          description: Session has reached the active-job limit
+    get:
+      operationId: listJobs
+      summary: List opaque job metadata for a session scope
+      parameters:
+        - in: query
+          name: sessionScopeId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Opaque jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ServerJob'
+  /v1/jobs/{jobId}:
+    delete:
+      operationId: cancelJob
+      summary: Cancel a registered job
+      parameters:
+        - in: path
+          name: jobId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Cancelled or already absent
+  /v1/jobs/{jobId}/ack:
+    post:
+      operationId: acknowledgeDeliveryAttempt
+      summary: Record the result of a wake-signal attempt
+      parameters:
+        - in: path
+          name: jobId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [attempt, outcome]
+              properties:
+                attempt:
+                  type: integer
+                  minimum: 0
+                  maximum: 5
+                outcome:
+                  type: string
+                  enum: [acknowledged, connection_unavailable, timeout, rejected, uncertain]
+      responses:
+        '204':
+          description: Attempt recorded
+  /v1/device/stream:
+    get:
+      operationId: connectDeviceStream
+      summary: Open the authenticated device WebSocket
+      description: >-
+        Upgrade this request to WebSocket. The server sends only opaque job IDs,
+        attempt numbers, and due timestamps. The device must validate each event
+        against its local store before delivering any message to an agent.
+      responses:
+        '101':
+          description: WebSocket upgraded
+components:
+  securitySchemes:
+    deviceToken:
+      type: http
+      scheme: bearer
+  schemas:
+    CreateJob:
+      type: object
+      additionalProperties: false
+      required: [id, sessionScopeId, dueAt, expiresAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sessionScopeId:
+          type: string
+          format: uuid
+          description: Random device-generated scope ID; not the host session ID.
+        dueAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+    ServerJob:
+      type: object
+      additionalProperties: false
+      required: [id, sessionScopeId, dueAt, expiresAt, state, retryCount]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sessionScopeId:
+          type: string
+          format: uuid
+        dueAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        state:
+          type: string
+          enum: [scheduled, waiting_for_device, delivering, delivered, cancelled, expired, uncertain]
+        retryCount:
+          type: integer
+          minimum: 0
+          maximum: 5
+        nextAttemptAt:
+          type: string
+          format: date-time
