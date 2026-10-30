@@ -1,10 +1,7 @@
-# Agent Scheduler v2
+# Agent Scheduler
 
 Cross-platform scheduler for agent sessions, with Auto-Continue as a job type.
 
-This is the new Go implementation area. It is intentionally separate from the
-existing macOS Auto-Continue prototype so the prototype and its in-progress
-changes remain intact.
 
 ## Data boundary
 
@@ -40,8 +37,8 @@ are deliberately absent from the server schema.
 The single interactive installer lets a user select Codex, Claude Code, or
 both. It downloads and verifies the matching connector release, installs the
 Agent Scheduler skill for each selected agent, updates that agent's MCP
-configuration, enrolls the device with the Worker, and installs the resident
-connector service.
+configuration, and installs the resident connector service. Cloud enrollment
+is optional.
 
 Once the npm package and first GitHub release are published, the user flow is:
 
@@ -64,8 +61,7 @@ enrolls one pseudonymous user/device and saves the bearer token locally. Existin
 cloud configuration is preserved if setup is rerun without a URL. The npx installer configures only the
 agents the user selected. Codex Desktop is configured directly through its
 user `config.toml`; Claude Code is configured in its user-level
-`~/.claude.json` MCP settings. The resident connector keeps the WebSocket connected and delivers due
-messages while agent apps are closed. For local-only use, run the executable as
+`~/.claude.json` MCP settings. When cloud delivery is configured, the resident connector maintains a WebSocket. It delivers due messages while agent apps are closed, as long as the device and service are running. For local-only use, run the executable as
 an MCP server without `setup`. Executables can be overridden with
 `AGENT_SCHEDULER_CODEX` and `AGENT_SCHEDULER_CLAUDE`; `AGENT_SCHEDULER_DB`
 overrides the database path.
