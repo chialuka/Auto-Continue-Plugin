@@ -23,8 +23,7 @@
           "Enable continuation after the next usage reset in this chat.",
           "When is this chat scheduled to resume?"
         ]
-      },
-      "hooks": "./hooks/hooks.json"
+      }
     }
   }
 }
