@@ -1,0 +1,6 @@
+{
+  "name": "auto-continue",
+  "version": "1.0.6",
+  "description": "Schedule continuation of this chat after its next usage reset.",
+  "hooks": "./hooks/hooks.json"
+}

@@ -115,3 +115,44 @@ cross-platform release packaging/update flow is also not complete. Auto-Continue
 requires the local Codex CLI's app-server usage read and queue support.
 End-to-end verification against a deployed Cloudflare account and real
 Codex/Claude sessions remains outstanding.
+
+## Persistent per-chat auto-continue (experimental)
+
+`set_auto_continue` accepts `sessionRef`, `workDir`, and `enabled`. Enable once
+per chat; inspect with `get_auto_continue`. Activation first verifies stored
+turn access, and uses the current turn as a baseline so old failures are not
+replayed. Disabling cancels pending watcher jobs, but cannot retract a delivery
+already claimed by a worker.
+
+The Auto-Continue plugin bundles a `PostModelRequest` MCP hook calling
+`agent-scheduler.record_model_request_outcome`. Review and trust this hook in
+Codex Settings > Hooks (or `/hooks` in the CLI), and keep the connector MCP
+connection available. An installer-only skill installation does not install
+this bundled hook; install the root plugin as well for persistent mode.
+
+The hook returns immediately after saving a failed-request hint locally.
+Completed/cancelled requests, disabled chats, and identified subagent callbacks
+are ignored. A unique chat/turn key deduplicates hints. The existing job worker
+checks pending hints after two seconds through `thread/turns/list`. If the turn
+is still in progress or inspection fails, it retries at ten-second intervals,
+up to six checks total. A latest turn with status `failed` and error
+`usageLimitExceeded` creates one reset job. A successful retry or newer turn
+causes the hint to be discarded. Exhausted verification is logged and discarded;
+there is no periodic scan of enabled chat history. A late duplicate callback
+can trigger a fresh verification, but cannot duplicate the continuation job. A local unique constraint on chat
+and failed turn deduplicates observations across processes and restarts. The
+preference remains enabled after delivery. Immediately before claiming a job,
+the worker checks that this same failure is still the latest turn. A later
+turn supersedes it. Temporary inspection failures defer delivery until expiry.
+Only the latest stored turn is considered. Hints survive connector restarts,
+but hooks missed while the MCP connection is unavailable cannot be recovered
+without an explicit inspection. Work superseded while offline is not resumed.
+
+Delivery now uses `codex queue --resume`. Successful command exit means queued,
+not confirmed execution: this CLI can warn that resume failed while still
+exiting successfully. The scheduler's existing `delivered` state therefore
+means queue acceptance only. Ambiguous CLI failures remain `uncertain` and are
+not automatically replayed. The watcher does not confirm a resumed turn has
+started. Device sleep, unsupported history APIs, missing CLI, and disconnected
+hosts can prevent continuation. Real desktop cross-process history visibility
+and a real usage-limit/resume cycle still require end-to-end verification.

@@ -31,7 +31,7 @@ func (c CLI) Dispatch(parent context.Context, job jobs.LocalJob) error {
 		if path == "" {
 			path = "codex"
 		}
-		cmd = exec.CommandContext(ctx, path, "queue", "--thread", job.SessionRef, "--message", job.Message)
+		cmd = exec.CommandContext(ctx, path, "queue", "--resume", "--thread", job.SessionRef, "--message", job.Message)
 	case jobs.ProviderClaudeCode:
 		path := c.ClaudePath
 		if path == "" {

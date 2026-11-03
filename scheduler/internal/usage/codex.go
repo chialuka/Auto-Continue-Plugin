@@ -42,62 +42,9 @@ type response struct {
 // CodexReset reads usage without starting a model turn and returns the next
 // safe resume time, one minute after the relevant usage reset.
 func CodexReset(parent context.Context, executable string, now time.Time) (time.Time, error) {
-	if executable == "" {
-		executable = os.Getenv("AGENT_SCHEDULER_CODEX")
-	}
-	if executable == "" {
-		executable, _ = exec.LookPath("codex")
-	}
-	if executable == "" && runtime.GOOS == "darwin" {
-		candidate := "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			executable = filepath.Clean(candidate)
-		}
-	}
-	if executable == "" {
-		return time.Time{}, errors.New("Codex CLI is unavailable; install it or set AGENT_SCHEDULER_CODEX")
-	}
-	ctx, cancel := context.WithTimeout(parent, readTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, executable, "app-server", "--listen", "stdio://")
-	stdin, err := cmd.StdinPipe()
+	data, err := codexRead(parent, executable, "account/rateLimits/read", map[string]any{})
 	if err != nil {
-		return time.Time{}, fmt.Errorf("start Codex usage reader: %w", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return time.Time{}, fmt.Errorf("read Codex usage reader: %w", err)
-	}
-	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
-		return time.Time{}, fmt.Errorf("start Codex app-server: %w", err)
-	}
-	defer func() {
-		_ = stdin.Close()
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	}()
-
-	reader := bufio.NewReader(stdout)
-	if err := send(stdin, map[string]any{
-		"id": 1, "method": "initialize", "params": map[string]any{
-			"clientInfo": map[string]string{"name": "agent-scheduler", "version": "0.1.0"},
-		},
-	}); err != nil {
 		return time.Time{}, err
-	}
-	if _, err := readResult(ctx, reader, 1); err != nil {
-		return time.Time{}, fmt.Errorf("initialize Codex app-server: %w", err)
-	}
-	if err := send(stdin, map[string]any{"method": "initialized"}); err != nil {
-		return time.Time{}, err
-	}
-	if err := send(stdin, map[string]any{"id": 2, "method": "account/rateLimits/read", "params": map[string]any{}}); err != nil {
-		return time.Time{}, err
-	}
-	data, err := readResult(ctx, reader, 2)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("read Codex account limits: %w", err)
 	}
 	var limits rateLimits
 	if err := json.Unmarshal(data, &limits); err != nil {
@@ -181,4 +128,93 @@ func readResult(ctx context.Context, reader *bufio.Reader, id int) (json.RawMess
 		}
 		return item.Result, nil
 	}
+}
+
+// LatestTurn reads persisted history without loading or starting the thread.
+type Turn struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Error  *struct {
+		Code json.RawMessage `json:"codexErrorInfo"`
+	} `json:"error"`
+}
+
+func (t Turn) UsageBlocked() bool {
+	return t.ID != "" && t.Status == "failed" && t.Error != nil && string(t.Error.Code) == `"usageLimitExceeded"`
+}
+func LatestTurn(ctx context.Context, executable, thread string) (Turn, error) {
+	data, err := codexRead(ctx, executable, "thread/turns/list", map[string]any{"threadId": thread, "limit": 1, "sortDirection": "desc", "itemsView": "notLoaded"})
+	if err != nil {
+		return Turn{}, err
+	}
+	var result struct {
+		Data []Turn `json:"data"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return Turn{}, err
+	}
+	if len(result.Data) == 0 {
+		return Turn{}, nil
+	}
+	return result.Data[0], nil
+}
+func codexRead(parent context.Context, executable, method string, params map[string]any) (json.RawMessage, error) {
+	if executable == "" {
+		executable = os.Getenv("AGENT_SCHEDULER_CODEX")
+	}
+	if executable == "" {
+		executable, _ = exec.LookPath("codex")
+	}
+	if executable == "" && runtime.GOOS == "darwin" {
+		candidate := "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			executable = filepath.Clean(candidate)
+		}
+	}
+	if executable == "" {
+		return nil, errors.New("Codex CLI is unavailable; install it or set AGENT_SCHEDULER_CODEX")
+	}
+	ctx, cancel := context.WithTimeout(parent, readTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, executable, "app-server", "--listen", "stdio://")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("start Codex usage reader: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("read Codex usage reader: %w", err)
+	}
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start Codex app-server: %w", err)
+	}
+	defer func() {
+		_ = stdin.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	reader := bufio.NewReader(stdout)
+	if err := send(stdin, map[string]any{
+		"id": 1, "method": "initialize", "params": map[string]any{
+			"clientInfo": map[string]string{"name": "agent-scheduler", "version": "0.1.0"},
+		},
+	}); err != nil {
+		return nil, err
+	}
+	if _, err := readResult(ctx, reader, 1); err != nil {
+		return nil, fmt.Errorf("initialize Codex app-server: %w", err)
+	}
+	if err := send(stdin, map[string]any{"method": "initialized"}); err != nil {
+		return nil, err
+	}
+	if err := send(stdin, map[string]any{"id": 2, "method": method, "params": params}); err != nil {
+		return nil, err
+	}
+	data, err := readResult(ctx, reader, 2)
+	if err != nil {
+		return nil, fmt.Errorf("read Codex account limits: %w", err)
+	}
+	return data, nil
 }

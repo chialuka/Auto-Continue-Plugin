@@ -1,0 +1,22 @@
+{
+  "hooks": {
+    "PostModelRequest": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "agent-scheduler",
+            "tool": "record_model_request_outcome",
+            "input": {
+              "sessionRef": "${session_id}",
+              "turnId": "${turn_id}",
+              "status": "${status}",
+              "agentId": "${agent_id}"
+            },
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

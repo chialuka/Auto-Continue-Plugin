@@ -57,6 +57,9 @@ func Open(path string) (*Store, error) {
 			ON local_jobs(session_scope_id, created_at);
 		CREATE INDEX IF NOT EXISTS local_jobs_due
 			ON local_jobs(due_at, id) WHERE state IN ('pending_registration','scheduled','waiting_for_device');
+		CREATE TABLE IF NOT EXISTS auto_continue_events (session_ref TEXT NOT NULL, turn_id TEXT NOT NULL, due_at INTEGER NOT NULL, attempts INTEGER NOT NULL, PRIMARY KEY(session_ref,turn_id));
+		CREATE TABLE IF NOT EXISTS auto_continue (session_ref TEXT PRIMARY KEY, work_dir TEXT NOT NULL, enabled INTEGER NOT NULL, baseline TEXT NOT NULL);
+		CREATE TABLE IF NOT EXISTS auto_continue_jobs (job_id TEXT PRIMARY KEY, session_ref TEXT NOT NULL, turn_id TEXT NOT NULL, UNIQUE(session_ref,turn_id));
 		CREATE TABLE IF NOT EXISTS session_scopes (
 			provider TEXT NOT NULL CHECK(provider IN ('codex','claude-code')),
 			session_ref TEXT NOT NULL,

@@ -20,7 +20,7 @@ import (
 // Resolve context in the calling agent, not the possibly shared MCP process.
 const contextInstructions = " For the current Codex chat, obtain sessionRef by reading CODEX_THREAD_ID in the calling agent's shell (CODEX_SESSION_ID is a fallback); obtain workDir from that shell's working directory. Do this yourself, without asking the user to find IDs. Never use an MCP transport ID, the server process environment, or the most recent chat as the target. If the host does not expose a reliable ID, report that limitation instead of guessing."
 
-const serverInstructions = `Agent Scheduler delivers messages to existing agent sessions. When the user invokes agent-scheduler, use these MCP tools; do not substitute native scheduled tasks, automations, or confirmation cards. Scheduling only saves the message: do not execute it now or wait for delivery. Resolve the current chat ID yourself from the calling agent's shell: CODEX_THREAD_ID, falling back to CODEX_SESSION_ID. Pass it as sessionRef.` + contextInstructions + ` For another target session, use its explicitly identified reference. For Claude Code, use host-provided session context; do not reuse a Codex ID. Convert the requested time to RFC3339 using the current clock and the user's timezone. If expiry is unspecified, use 24 hours after dueAt. Call the scheduling tool once and stop on success. If tools or context are unavailable, report the problem; do not silently create a native automation. Follow host permissions and approvals.`
+const serverInstructions = `Agent Scheduler delivers messages to existing agent sessions. When the user invokes agent-scheduler, use these MCP tools; do not substitute native scheduled tasks, automations, or confirmation cards. Scheduling only saves the message: do not execute it now or wait for delivery. Resolve the current chat ID yourself from the calling agent's shell: CODEX_THREAD_ID, falling back to CODEX_SESSION_ID. Pass it as sessionRef.` + contextInstructions + ` For another target session, use its explicitly identified reference. For Claude Code, use host-provided session context; do not reuse a Codex ID. Convert the requested time to RFC3339 using the current clock and the user's timezone. If expiry is unspecified, use 24 hours after dueAt. For one-time scheduling, call the scheduling tool once and stop on success. For persistent preference changes with set_auto_continue, always send a short final confirmation after success: “Persistent auto-continue is enabled for this chat.” or “Persistent auto-continue is disabled for this chat.” Status requests also require a readable final answer. Never return a blank final response for preference or status tools. If tools or context are unavailable, report the problem; do not silently create a native automation. Follow host permissions and approvals.`
 
 type Server struct {
 	store  *localstore.Store
@@ -99,6 +99,9 @@ func (s *Server) Run(ctx context.Context) error {
 		Title:       "Cancel a scheduled message",
 		Description: "Cancel a message that has not begun delivery, or dismiss an uncertain delivery. A message already being sent to the agent cannot be retracted. Provide the provider and local session reference." + contextInstructions,
 	}, s.cancelMessage)
+	mcp.AddTool(server, &mcp.Tool{Name: "set_auto_continue", Description: "Enable or disable persistent auto-continue for future usage-limit failures in this Codex chat. Disable cancels pending watcher jobs. After success, explicitly confirm enabled or disabled in a short final reply." + contextInstructions}, s.setAutoContinue)
+	mcp.AddTool(server, &mcp.Tool{Name: "get_auto_continue", Description: "Read persistent auto-continue status for this Codex chat." + contextInstructions}, s.getAutoContinue)
+	mcp.AddTool(server, &mcp.Tool{Name: "record_model_request_outcome", Description: "Lifecycle hook callback only. Save a failed model-request hint for an enabled chat; this does not start work or confirm a terminal failure. Do not call manually."}, s.recordModelRequestOutcome)
 	return server.Run(ctx, &mcp.StdioTransport{})
 }
 
@@ -226,4 +229,78 @@ func newID() (string, error) {
 	id[6] = (id[6] & 0x0f) | 0x40
 	id[8] = (id[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", id[0:4], id[4:6], id[6:8], id[8:10], id[10:16]), nil
+}
+
+type AutoContinueInput struct {
+	SessionRef string `json:"sessionRef"`
+	WorkDir    string `json:"workDir"`
+	Enabled    bool   `json:"enabled"`
+}
+
+func (s *Server) setAutoContinue(ctx context.Context, _ *mcp.CallToolRequest, in AutoContinueInput) (*mcp.CallToolResult, localstore.AutoContinue, error) {
+	a := localstore.AutoContinue{SessionRef: in.SessionRef, WorkDir: in.WorkDir, Enabled: in.Enabled}
+	if in.Enabled {
+		if !filepath.IsAbs(in.WorkDir) {
+			return nil, a, fmt.Errorf("workDir must be absolute")
+		}
+		info, err := os.Stat(in.WorkDir)
+		if err != nil || !info.IsDir() {
+			return nil, a, fmt.Errorf("workDir must be an existing directory")
+		}
+		turn, err := usage.LatestTurn(ctx, "", in.SessionRef)
+		if err != nil {
+			return nil, a, fmt.Errorf("verify stored turn access: %w", err)
+		}
+		a.Baseline = turn.ID
+	}
+	if err := s.store.SetAutoContinue(ctx, a); err != nil {
+		return nil, a, err
+	}
+	return s.getAutoContinue(ctx, nil, struct {
+		SessionRef string `json:"sessionRef"`
+	}{in.SessionRef})
+}
+func (s *Server) getAutoContinue(ctx context.Context, _ *mcp.CallToolRequest, in struct {
+	SessionRef string `json:"sessionRef"`
+}) (*mcp.CallToolResult, localstore.AutoContinue, error) {
+	if in.SessionRef == "" {
+		return nil, localstore.AutoContinue{}, fmt.Errorf("session reference is required")
+	}
+	settings, err := s.store.AutoContinueSettings(ctx)
+	if err != nil {
+		return nil, localstore.AutoContinue{}, err
+	}
+	for _, a := range settings {
+		if a.SessionRef == in.SessionRef {
+			return nil, a, nil
+		}
+	}
+	return nil, localstore.AutoContinue{SessionRef: in.SessionRef}, nil
+}
+
+type ModelRequestOutcome struct {
+	SessionRef string  `json:"sessionRef"`
+	TurnID     string  `json:"turnId"`
+	Status     string  `json:"status"`
+	AgentID    *string `json:"agentId,omitempty"`
+}
+type HookResult struct {
+	Accepted bool `json:"accepted"`
+}
+
+func (s *Server) recordModelRequestOutcome(ctx context.Context, _ *mcp.CallToolRequest, in ModelRequestOutcome) (*mcp.CallToolResult, HookResult, error) {
+	if in.Status != "failed" {
+		return nil, HookResult{}, nil
+	}
+	if in.SessionRef == "" || in.TurnID == "" {
+		return nil, HookResult{}, fmt.Errorf("hook session and turn IDs are required")
+	}
+	// Subagent hooks may carry the parent's session_id. Never attribute them to it.
+	if in.AgentID != nil && *in.AgentID != "" && *in.AgentID != in.SessionRef {
+		return nil, HookResult{}, nil
+	}
+	if err := s.store.RecordFailureEvent(ctx, in.SessionRef, in.TurnID); err != nil {
+		return nil, HookResult{}, err
+	}
+	return nil, HookResult{Accepted: true}, nil
 }

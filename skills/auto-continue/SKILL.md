@@ -3,7 +3,11 @@ name: auto-continue
 description: Enable, inspect or cancel automatic continuation after a usage reset in this local Codex chat.
 ---
 
-# Enable immediately
+# Persistent per-chat mode
+
+For “enable once”, “always in this chat”, or persistent auto-continue, resolve the current chat and working directory as below and call `set_auto_continue` with `enabled: true`. Persistent mode requires this plugin’s bundled `PostModelRequest` hook to be installed and trusted in Codex Settings > Hooks, with the `agent-scheduler` MCP connection available. Saving the preference does not verify hook trust or callback delivery. This saves a preference and handles future hook-reported usage-limit failures; it does not schedule an immediate message or start work. Use `get_auto_continue` for preference status and `set_auto_continue` with `enabled: false` to disable it and cancel pending watcher jobs. Report tool errors accurately. After a successful preference change, always send a short final confirmation: “Persistent auto-continue is enabled for this chat.” or “Persistent auto-continue is disabled for this chat.” For status, give a readable answer. Do not return an empty final response. The silent-stop instructions below apply only to one-time scheduling, not persistent preferences or status. The one-time tool below remains available when the user explicitly requests the next reset only.
+
+# One-time scheduling only
 
 For a request to enable continuation, perform scheduling only. Treat any task
 description accompanying the request as the message to save for the due time,

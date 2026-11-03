@@ -10,6 +10,7 @@ import (
 	"agent-scheduler/internal/host"
 	"agent-scheduler/internal/jobs"
 	"agent-scheduler/internal/localstore"
+	"agent-scheduler/internal/usage"
 )
 
 type Worker struct {
@@ -17,6 +18,8 @@ type Worker struct {
 	Dispatcher host.Dispatcher
 	Remote     *controlplane.Client
 	Interval   time.Duration
+	readTurn   func(context.Context, string) (usage.Turn, error)
+	readReset  func(context.Context) (time.Time, error)
 }
 
 func (w Worker) Run(ctx context.Context) {
@@ -32,6 +35,7 @@ func (w Worker) Run(ctx context.Context) {
 			w.syncRemote(ctx)
 			lastRemoteSync = time.Now()
 		}
+		w.processFailureEvents(ctx)
 		w.runOnce(ctx)
 		select {
 		case <-ctx.Done():
@@ -83,6 +87,15 @@ func (w Worker) HandleSignal(ctx context.Context, signal controlplane.DeviceSign
 }
 
 func (w Worker) deliver(ctx context.Context, job jobs.LocalJob, attempt int, now time.Time) {
+	current, checkErr := w.autoContinueCurrent(ctx, job)
+	if checkErr != nil {
+		log.Printf("validate auto-continue delivery: %v", checkErr)
+		return
+	}
+	if !current {
+		_, _ = w.Store.Cancel(ctx, job.SessionScopeID, job.ID)
+		return
+	}
 	claimed, err := w.Store.ClaimDue(ctx, job.ID, now)
 	if err != nil {
 		log.Printf("claim scheduled message %s: %v", job.ID, err)

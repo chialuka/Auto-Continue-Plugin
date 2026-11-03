@@ -42,3 +42,9 @@ Use `list_scheduled_messages` or `cancel_scheduled_message` only when the user
 asks to inspect or cancel schedules. If the scheduler tools are unavailable,
 tell the user to install and configure the local connector with
 `agent-scheduler setup`. A Worker URL is optional.
+
+## Persistent continuation
+
+For enable-once or always-on continuation in the current Codex chat, use `set_auto_continue` with the exact `sessionRef`, absolute `workDir`, and `enabled: true`. Use `get_auto_continue` for status; disable with `set_auto_continue` and `enabled: false`. This requires the Auto-Continue plugin’s trusted `PostModelRequest` hook and an available MCP connection. The scheduler skill alone does not install that hook. This handles future hook-reported usage-limit failures and does not start work during activation. Keep `schedule_auto_continue` for an explicitly one-time request.
+
+After `set_auto_continue` succeeds, always send a short final confirmation of whether persistent auto-continue is enabled or disabled for this chat. Give a readable final answer for status as well. Silent-stop instructions for one-time scheduling do not apply to preference or status tools.

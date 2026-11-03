@@ -31,3 +31,7 @@ Persistent automatic recovery after every usage-limit interruption is not yet im
 ## Earlier installations
 
 The older Python/macOS scheduler is no longer part of this source tree. Its installed background service and pending timers are independent of Agent Scheduler; they are not migrated or removed automatically. Disable the old service and review any pending timers before enabling the new connector for the same chat.
+
+Persistent per-chat mode is available experimentally: ask “Enable auto-continue once for this chat.” The connector saves an enabled preference, receives model-request hook events and verifies usage-limit failures, and schedules one continuation per failed turn. Ask to inspect or disable auto-continue for this chat. See [persistent-mode behavior and limitations](scheduler/README.md#persistent-per-chat-auto-continue-experimental). Rebuild the connector and restart its service/MCP connection to load changes.
+
+Persistent mode requires the bundled `PostModelRequest` hook to be reviewed and trusted in Codex Settings > Hooks. It uses the already-connected `agent-scheduler` MCP server; installing only the scheduler skill does not install this plugin hook.
